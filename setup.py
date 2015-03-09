@@ -10,7 +10,7 @@ setup(
     zip_safe=True,
     install_requires=[
         'pyuv >= 0.10, < 1.0.0',
-        'redis >= 2.9.1'
+        'python-memcached > 1'
     ],
     entry_points={
         'console_scripts': [

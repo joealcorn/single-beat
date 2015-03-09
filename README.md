@@ -9,7 +9,7 @@ but if that server gets down, well, you go and start it at another server etc. A
 How
 ---------
 
-We use redis as a lock server, and wrap your process with single-beat, in two servers,
+We use memcached as a lock server, and wrap your process with single-beat, in two servers,
 
 ```bash
 single-beat celery beat
@@ -42,12 +42,12 @@ Configuration
 You can configure single-beat with environment variables, like
 
 ```bash
-SINGLE_BEAT_REDIS_SERVER='redis://redis-host:6379/1' single-beat celery beat
+SINGLE_BEAT_MEMCACHED_SERVER='127.0.0.1:11211' single-beat celery beat
 ```
 
-- SINGLE_BEAT_REDIS_SERVER
+- SINGLE_BEAT_MEMCACHED_SERVER
 
-    you can give redis host url, we pass it to from_url of [redis-py](http://redis-py.readthedocs.org/en/latest/#redis.StrictRedis.from_url)
+    a command delimited list of memcached servers, eg `192.168.3.1:11211,192.168.3.6:11211,192.168.3.2:11211`
 
 - SINGLE_BEAT_IDENTIFIER
 
@@ -67,7 +67,7 @@ SINGLE_BEAT_REDIS_SERVER='redis://redis-host:6379/1' single-beat celery beat
 - SINGLE_BEAT_INITIAL_LOCK_TIME (default 2 * SINGLE_BEAT_LOCK_TIME seconds)
 - SINGLE_BEAT_HEARTBEAT_INTERVAL (default 1 second)
 
-    when starting your process, we set a key with 10 second expiration (INITIAL_LOCK_TIME) in redis server, other single-beat processes checks if that key exists - if it exists they won't spawn children. We continue to update that key every 1 second (HEARTBEAT_INTERVAL) setting it with a ttl of 5 seconds (LOCK_TIME)
+    when starting your process, we set a key with 10 second expiration (INITIAL_LOCK_TIME) in memcached server, other single-beat processes checks if that key exists - if it exists they won't spawn children. We continue to update that key every 1 second (HEARTBEAT_INTERVAL) setting it with a ttl of 5 seconds (LOCK_TIME)
 
     this should work, but you might want to give more relaxed intervals, like:
 
@@ -84,27 +84,16 @@ SINGLE_BEAT_REDIS_SERVER='redis://redis-host:6379/1' single-beat celery beat
     ```
 
     ```bash
-    (env)$ redis-cli
-    redis 127.0.0.1:6379> keys *
-    1) "_kombu.binding.celeryev"
-    2) "celery"
-    3) "_kombu.binding.celery"
-    4) "SINGLE_BEAT_celery-beat"
-    redis 127.0.0.1:6379> get SINGLE_BEAT_celery-beat
-    "aybarss-MacBook-Air.local:43213"
-    redis 127.0.0.1:6379>
-    ```
-
-    ```bash
     SINGLE_BEAT_HOST_IDENTIFIER='192.168.1.1' SINGLE_BEAT_IDENTIFIER='celery-beat' single-beat celery beat
     ```
 
     ```bash
-    (env)$ redis-cli
-    redis 127.0.0.1:6379> keys *
-    1) "SINGLE_BEAT_celery-beat"
-    redis 127.0.0.1:6379> get SINGLE_BEAT_celery-beat
-    "192.168.1.1:43597"
+    (env)$ telnet localhost 11211
+    Connected to localhost.
+    Escape character is '^]'.
+    get SINGLE_BEAT_celery-beat
+    192.168.1.1:43597
+    END
     ```
 
 - SINGLE_BEAT_LOG_LEVEL (default warn)
@@ -141,7 +130,7 @@ SINGLE_BEAT_REDIS_SERVER='redis://redis-host:6379/1' single-beat celery beat
 
     ```bash
     [program:celerybeat]
-    environment=SINGLE_BEAT_IDENTIFIER="celery-beat",SINGLE_BEAT_REDIS_HOST="redis://localhost:6379/0",SINGLE_BEAT_WAIT_MODE="supervised", SINGLE_BEAT_WAIT_BEFORE_DIE=10
+    environment=SINGLE_BEAT_IDENTIFIER="celery-beat",SINGLE_BEAT_MEMCACHED_SERVER="localhost:11211",SINGLE_BEAT_WAIT_MODE="supervised", SINGLE_BEAT_WAIT_BEFORE_DIE=10
     command=single-beat celery beat -A example.tasks
     numprocs=1
     stdout_logfile=./logs/celerybeat.log

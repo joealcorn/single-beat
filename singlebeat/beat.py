@@ -3,19 +3,19 @@ import sys
 import pyuv
 import time
 import socket
-import redis
+import memcache
 import logging
 import signal
 
-REDIS_SERVER = os.environ.get('SINGLE_BEAT_REDIS_SERVER',
-                              'redis://localhost:6379')
+MEMCACHED_SERVERS = os.environ.get('SINGLE_BEAT_MEMCACHED_SERVER', '127.0.0.1:11211')
+MEMCACHED_SERVERS = MEMCACHED_SERVERS.split(',')
+
+
 IDENTIFIER = os.environ.get('SINGLE_BEAT_IDENTIFIER', None)
 LOCK_TIME = int(os.environ.get('SINGLE_BEAT_LOCK_TIME', 5))
-INITIAL_LOCK_TIME = int(os.environ.get('SINGLE_BEAT_INITIAL_LOCK_TIME',
-                                       LOCK_TIME * 2))
+INITIAL_LOCK_TIME = int(os.environ.get('SINGLE_BEAT_INITIAL_LOCK_TIME', LOCK_TIME * 2))
 HEARTBEAT_INTERVAL = int(os.environ.get('SINGLE_BEAT_HEARTBEAT_INTERVAL', 1))
-HOST_IDENTIFIER = os.environ.get('SINGLE_BEAT_HOST_IDENTIFIER',
-                                 socket.gethostname())
+HOST_IDENTIFIER = os.environ.get('SINGLE_BEAT_HOST_IDENTIFIER', socket.gethostname())
 LOG_LEVEL = os.environ.get('SINGLE_BEAT_LOG_LEVEL', 'warn')
 
 # wait_mode can be, supervisored or heartbeat
@@ -27,8 +27,7 @@ numeric_log_level = getattr(logging, LOG_LEVEL.upper(), None)
 logging.basicConfig(level=numeric_log_level)
 logger = logging.getLogger(__name__)
 
-rds = redis.Redis.from_url(REDIS_SERVER)
-rds.ping()
+mc = memcache.Client(MEMCACHED_SERVERS)
 
 
 class Process(object):
@@ -45,6 +44,10 @@ class Process(object):
         self.loop = pyuv.Loop.default_loop()
         self.timer = pyuv.Timer(self.loop)
         self.state = 'WAITING'
+
+    @property
+    def lock_key(self):
+        return 'SINGLE_BEAT_%s' % self.identifier
 
     def proc_exit_cb(self, proc, exit_status, term_signal):
         sys.exit(exit_status)
@@ -71,13 +74,12 @@ class Process(object):
                     time.sleep(WAIT_BEFORE_DIE)
                     sys.exit()
         elif self.state == "RUNNING":
-            rds.set("SINGLE_BEAT_%s" % self.identifier,
-                    "%s:%s" % (HOST_IDENTIFIER, self.proc.pid), ex=LOCK_TIME)
+            value = '%s:%s' % (HOST_IDENTIFIER, self.proc.pid)
+            mc.set(self.lock_key, value, time=LOCK_TIME)
 
     def acquire_lock(self, identifier):
-        return rds.execute_command('SET', 'SINGLE_BEAT_%s' % self.identifier,
-                                   "%s:%s" % (HOST_IDENTIFIER, '0'),
-                                   'NX', 'EX', INITIAL_LOCK_TIME)
+        value = '%s:%s' % (HOST_IDENTIFIER, '0')
+        return mc.add(self.lock_key, value, time=INITIAL_LOCK_TIME)
 
     def sigterm_handler(self, signum, frame):
         logging.debug("our state %s", self.state)
